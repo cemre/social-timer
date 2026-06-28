@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Social Media Time Tracker",
+  "version": "1.2",
+  "description": "TLDR: Shows how much time you spend on social media.",
+  "permissions": [
+    "storage"
+  ],
+  "content_scripts": [{
+    "matches": [
+      "*://*.twitter.com/*",
+      "*://*.x.com/*",
+      "*://*.threads.com/*",
+      "*://*.instagram.com/*",
+      "*://*.facebook.com/*",
+      "*://*.messenger.com/*",
+      "*://*.bsky.app/*",
+      "*://*.reddit.com/*",
+      "*://news.ycombinator.com/*"
+    ],
+    "js": ["content.js"]
+  }],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
