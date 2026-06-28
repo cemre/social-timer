@@ -14,6 +14,8 @@
       "*://*.instagram.com/*",
       "*://*.facebook.com/*",
       "*://*.messenger.com/*",
+      "*://*.linkedin.com/*",
+      "*://*.youtube.com/*",
       "*://*.bsky.app/*",
       "*://*.reddit.com/*",
       "*://news.ycombinator.com/*"
