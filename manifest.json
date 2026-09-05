@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Social Media Time Tracker",
-  "version": "1.4",
+  "version": "1.5",
   "description": "TLDR: Shows how much time you spend on social media.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -17,6 +17,7 @@
       "*://*.twitter.com/*",
       "*://*.x.com/*",
       "*://*.threads.com/*",
+      "*://*.threads.net/*",
       "*://*.instagram.com/*",
       "*://*.facebook.com/*",
       "*://*.messenger.com/*",
@@ -26,7 +27,7 @@
       "*://*.reddit.com/*",
       "*://news.ycombinator.com/*"
     ],
-    "js": ["content.js"]
+    "js": ["content.js", "feedgate.js"]
   }],
   "background": {
     "service_worker": "background.js"
