@@ -102,9 +102,14 @@
   }
 
   function findFeed() {
+    // Return the first *visible* match. SPA navigation (e.g. Threads
+    // home -> activity) can leave a stale 0x0 element matching the same
+    // selector; picking it would hide nothing and mispositon the card.
     for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      if (el) return el;
+      for (const el of document.querySelectorAll(sel)) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) return el;
+      }
     }
     return null;
   }
