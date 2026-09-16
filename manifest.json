@@ -27,7 +27,7 @@
       "*://*.reddit.com/*",
       "*://news.ycombinator.com/*"
     ],
-    "js": ["content.js", "feedgate.js"]
+    "js": ["sites.js", "content.js", "feedgate.js"]
   }],
   "background": {
     "service_worker": "background.js"

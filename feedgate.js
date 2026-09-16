@@ -5,32 +5,25 @@
   const COOLDOWN_MS = 30 * 1000;     // 30-second lockout after a window
   const TICK_MS = 500;
 
-  // hostname -> { feed: ordered feed selectors (first match wins),
-  //              skip: RegExp of pathnames where the gate must NOT run }.
-  // Fail-open: if no selector matches, the gate does nothing rather than
-  // breaking the page. `skip` keeps DMs reachable — the feed selectors on
-  // these sites also cover the DM view, and we don't want to gate that.
-  const SITE_CONFIG = {
-    'twitter.com':  { feed: ['[aria-label^="Timeline"]', '[data-testid="primaryColumn"]'], skip: /^\/(messages|i\/chat)/ },
-    'x.com':        { feed: ['[aria-label^="Timeline"]', '[data-testid="primaryColumn"]'], skip: /^\/(messages|i\/chat)/ },
-    'threads.com':  { feed: ['[role="region"]', '[role="main"]'], skip: /^\/messages/ },
-    'threads.net':  { feed: ['[role="region"]', '[role="main"]'], skip: /^\/messages/ },
-    'reddit.com':   { feed: ['shreddit-feed', 'shreddit-comment-tree', '#siteTable', 'main'] },
-    'instagram.com':{ feed: ['main[role="main"]'], skip: /^\/direct/ },
-    'facebook.com': { feed: ['[role="feed"]', '[role="main"]'] },
-  };
+  // The tracked-site list lives in sites.js, which manifest.json injects
+  // ahead of this file into the same isolated world. Fail-open: if it somehow
+  // did not load, do nothing rather than break the page.
+  const sites = globalThis.SOCIAL_TIMER_SITES;
+  const hostMatches = globalThis.socialTimerHostMatches;
+  if (!sites || !hostMatches) return;
 
   const host = location.hostname.replace(/^www\./, '');
-  const siteKey = Object.keys(SITE_CONFIG).find(k => host === k || host.endsWith('.' + k));
-  if (!siteKey) return;
+  // Only sites carrying a `feed` block are gated; the rest are timed only.
+  const site = sites.find(s => s.feed && s.hosts.some(h => hostMatches(s, h, host)));
+  if (!site) return;
 
-  const config = SITE_CONFIG[siteKey];
-  const selectors = config.feed;
+  const siteKey = site.hosts.find(h => hostMatches(site, h, host));
+  const selectors = site.feed.selectors;
   const storeKey = 'feedgate:' + siteKey;
 
   // True on routes where the feed selector would also cover DMs etc.
   function isSkippedRoute() {
-    return !!(config.skip && config.skip.test(location.pathname));
+    return !!(site.feed.skip && site.feed.skip.test(location.pathname));
   }
 
   function unhideAll() {
