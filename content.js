@@ -1,4 +1,4 @@
-let timerContainer, sessionTimerDisplay, dailyTimerDisplay, visitsDisplay;
+let timerContainer, sessionTimerDisplay, dailyTimerDisplay, siteDisplay, visitsDisplay;
 let lastUpdateTime = Date.now();
 let port = null;
 
@@ -63,6 +63,11 @@ function createTimerUI() {
         opacity: 0.8;
         line-height: 1;
       }
+      .social-timer__site {
+        font-size: 12px;
+        opacity: 0.8;
+        line-height: 1;
+      }
       .social-timer--error {
         background: rgba(255, 0, 0, 0.8);
       }
@@ -74,9 +79,10 @@ function createTimerUI() {
   timerContainer = Object.assign(document.createElement('div'), { className: 'social-timer' });
   sessionTimerDisplay = Object.assign(document.createElement('div'), { className: 'social-timer__session' });
   dailyTimerDisplay = Object.assign(document.createElement('div'), { className: 'social-timer__daily' });
+  siteDisplay = Object.assign(document.createElement('div'), { className: 'social-timer__site' });
   visitsDisplay = Object.assign(document.createElement('div'), { className: 'social-timer__visits' });
   
-  timerContainer.append(sessionTimerDisplay, dailyTimerDisplay, visitsDisplay);
+  timerContainer.append(sessionTimerDisplay, dailyTimerDisplay, siteDisplay, visitsDisplay);
   document.body.appendChild(timerContainer);
 }
 
@@ -91,7 +97,9 @@ function formatTime(seconds) {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-function updateDisplays(sessionSeconds, dailySeconds, visits) {
+function updateDisplays(stats) {
+  const sessionSeconds = stats.sessionTime;
+  const dailySeconds = stats.dailyTime;
   if (!sessionTimerDisplay || isNaN(sessionSeconds) || isNaN(dailySeconds)) return;
   
   // Check if updates have stopped
@@ -109,7 +117,10 @@ function updateDisplays(sessionSeconds, dailySeconds, visits) {
   
   sessionTimerDisplay.textContent = formatTime(sessionSeconds);
   dailyTimerDisplay.textContent = `Today: ${formatTime(dailySeconds)}`;
-  visitsDisplay.textContent = `Visits: ${visits}`;
+  siteDisplay.textContent = stats.siteLabel
+    ? `${stats.siteLabel}: ${formatTime(stats.siteDailyTime)}`
+    : '';
+  visitsDisplay.textContent = `Visits: ${stats.dailyVisits}`;
   timerContainer.classList.add('is-visible');
 }
 
@@ -129,11 +140,13 @@ function refreshConnection() {
 // Establish connection with background script
 function setupConnection() {
   try {
-    port = chrome.runtime.connect();
+    // The port name carries the hostname so the service worker can attribute
+    // this tab's time to a site from the moment it connects.
+    port = chrome.runtime.connect({ name: location.hostname });
     
     port.onMessage.addListener(msg => {
       if (msg.type === 'UPDATE_TIMERS' || msg.type === 'INITIAL_STATE') {
-        updateDisplays(msg.sessionTime, msg.dailyTime, msg.dailyVisits);
+        updateDisplays(msg);
       }
     });
     

@@ -1,175 +1,259 @@
 // background.js
+importScripts('sites.js');
+
+const SESSION_IDLE_MS = 15 * 60 * 1000;
+const TICK_MS = 1000;
+
 const state = {
-  sessionTime: 0,
-  dailyTime: 0,
-  isRunning: false,
-  startTime: null,
+  // host -> seconds accrued in the current session (excludes time still ticking)
+  session: {},
+  // host -> { time: seconds today, visits: count today }
+  today: {},
+  // dayKey -> { host -> seconds }
+  historicalData: {},
   lastActiveTime: null,
   lastResetDate: null,
-  updateInterval: null,
-  historicalData: {},
   lastHeartbeat: null,
-  activePort: null,  // Track the active content script connection
-  dailyVisits: 0,    // Track number of visits today
-  visitedTabs: new Set()  // Track unique tabs to avoid counting tab switches
+  updateInterval: null,
+  // port -> { host, active }. More than one tracked tab can be connected at once.
+  ports: new Map(),
+  // host -> ms timestamp it started accruing. A host is in here while at least
+  // one of its tabs is active, so two tabs on the same site never double count.
+  activeHosts: new Map(),
+  // `${host}:${tabId}` for tabs already counted as a visit today
+  visitedTabs: new Set()
 };
 
 function saveState() {
   chrome.storage.local.set({
-    sessionTime: state.sessionTime,
-    dailyTime: state.dailyTime,
+    session: state.session,
+    today: state.today,
     lastActiveTime: state.lastActiveTime,
     lastResetDate: state.lastResetDate,
-    historicalData: state.historicalData,
-    dailyVisits: state.dailyVisits
+    historicalData: state.historicalData
   });
 }
 
-async function saveDailyTotal() {
-  if (state.dailyTime > 0) {
-    state.historicalData[state.lastResetDate] = state.dailyTime;
-    await chrome.storage.local.set({ historicalData: state.historicalData });
+function saveDailyTotal() {
+  const day = {};
+  for (const [host, entry] of Object.entries(state.today)) {
+    if (entry.time > 0) day[host] = entry.time;
+  }
+  if (Object.keys(day).length > 0) {
+    state.historicalData[state.lastResetDate] = day;
+    chrome.storage.local.set({ historicalData: state.historicalData });
   }
 }
 
-function updateTimers() {
-  if (!state.isRunning) return;
-  
-  const currentTime = Math.floor((Date.now() - state.startTime) / 1000);
-  
-  // Check if timer seems stuck
-  if (state.lastHeartbeat && Date.now() - state.lastHeartbeat > 5000) {
-    console.warn('Timer heartbeat missed, restarting interval');
-    clearInterval(state.updateInterval);
-    state.updateInterval = setInterval(updateTimers, 1000);
-  }
-  
-  state.lastHeartbeat = Date.now();
-  
-  // Send update to active content script
-  if (state.activePort) {
-    try {
-      state.activePort.postMessage({
-        type: 'UPDATE_TIMERS',
-        sessionTime: state.sessionTime + currentTime,
-        dailyTime: state.dailyTime + currentTime,
-        dailyVisits: state.dailyVisits
-      });
-    } catch (e) {
-      console.warn('Failed to send update, port may be disconnected');
-      pauseTimer();
-    }
-  }
+function todayEntry(host) {
+  if (!state.today[host]) state.today[host] = { time: 0, visits: 0 };
+  return state.today[host];
 }
 
-async function startTimer() {
-  // Reset if timer was stuck
-  if (state.isRunning && Date.now() - state.lastHeartbeat > 5000) {
-    state.isRunning = false;
+// Seconds this host has been accruing since it last became active.
+function liveSeconds(host) {
+  const startedAt = state.activeHosts.get(host);
+  return startedAt ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) : 0;
+}
+
+// Global figures, still the sum across every site so the overlay keeps its
+// existing meaning; the per-site numbers ride alongside them.
+function totals() {
+  const hosts = new Set([
+    ...Object.keys(state.session),
+    ...Object.keys(state.today),
+    ...state.activeHosts.keys()
+  ]);
+
+  let sessionTime = 0;
+  let dailyTime = 0;
+  for (const host of hosts) {
+    const live = liveSeconds(host);
+    sessionTime += (state.session[host] || 0) + live;
+    dailyTime += ((state.today[host] || {}).time || 0) + live;
   }
-  
-  if (state.isRunning) return;
-  
-  // Reset session if inactive for 15+ minutes
-  if (state.lastActiveTime && Date.now() - state.lastActiveTime >= 15 * 60 * 1000) {
-    state.sessionTime = 0;
+
+  let dailyVisits = 0;
+  for (const entry of Object.values(state.today)) dailyVisits += entry.visits || 0;
+
+  return { sessionTime, dailyTime, dailyVisits };
+}
+
+function payloadFor(host) {
+  const live = host ? liveSeconds(host) : 0;
+  const entry = (host && state.today[host]) || { time: 0, visits: 0 };
+  return {
+    ...totals(),
+    host,
+    siteLabel: host ? siteLabel(host) : '',
+    siteSessionTime: host ? (state.session[host] || 0) + live : 0,
+    siteDailyTime: entry.time + live,
+    siteDailyVisits: entry.visits || 0
+  };
+}
+
+// Banks whatever a host has accrued and takes it out of the active set.
+function stopHost(host) {
+  const startedAt = state.activeHosts.get(host);
+  if (!startedAt) return;
+
+  state.activeHosts.delete(host);
+  const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  if (elapsed > 0) {
+    state.session[host] = (state.session[host] || 0) + elapsed;
+    todayEntry(host).time += elapsed;
   }
-  
-  // Reset daily if it's a new day
-  const today = new Date().toLocaleDateString();
-  if (state.lastResetDate !== today) {
-    await saveDailyTotal();
-    state.dailyTime = 0;
-    state.lastResetDate = today;
-  }
-  
-  state.startTime = Date.now();
   state.lastActiveTime = Date.now();
-  state.lastHeartbeat = Date.now();
-  state.isRunning = true;
-  state.updateInterval = setInterval(updateTimers, 1000);
-  saveState();
 }
 
-async function pauseTimer() {
-  if (!state.isRunning) return;
-  
+function stopAllHosts() {
+  for (const host of [...state.activeHosts.keys()]) stopHost(host);
+}
+
+function rollOverDayIfNeeded() {
+  const key = dayKey();
+  if (state.lastResetDate === key) return false;
+
+  saveDailyTotal();
+  state.today = {};
+  state.visitedTabs.clear();
+  state.lastResetDate = key;
+  return true;
+}
+
+function resetSessionIfIdle() {
+  if (state.activeHosts.size > 0) return;
+  if (state.lastActiveTime && Date.now() - state.lastActiveTime >= SESSION_IDLE_MS) {
+    state.session = {};
+  }
+}
+
+function startTicking() {
+  if (state.updateInterval) return;
+  state.lastHeartbeat = Date.now();
+  state.updateInterval = setInterval(tick, TICK_MS);
+}
+
+function stopTicking() {
+  if (!state.updateInterval) return;
   clearInterval(state.updateInterval);
   state.updateInterval = null;
-  
-  const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
-  state.sessionTime += elapsed;
-  state.dailyTime += elapsed;
-  state.isRunning = false;
-  state.lastActiveTime = Date.now();
-  
+}
+
+function broadcast(type) {
+  const dead = [];
+  for (const [port, info] of state.ports) {
+    try {
+      port.postMessage({ type, ...payloadFor(info.host) });
+    } catch (e) {
+      console.warn('Failed to send update, port may be disconnected');
+      dead.push(port);
+    }
+  }
+  if (dead.length > 0) {
+    for (const port of dead) state.ports.delete(port);
+    syncActivity();
+  }
+}
+
+// Recomputes which hosts are accruing from the current set of ports. Called
+// whenever a tab reports a change, connects or disconnects.
+function syncActivity() {
+  const activeNow = new Set();
+  for (const info of state.ports.values()) {
+    if (info.active && info.host) activeNow.add(info.host);
+  }
+
+  for (const host of [...state.activeHosts.keys()]) {
+    if (!activeNow.has(host)) stopHost(host);
+  }
+
+  if (activeNow.size > 0) {
+    resetSessionIfIdle();
+    rollOverDayIfNeeded();
+    const now = Date.now();
+    for (const host of activeNow) {
+      if (!state.activeHosts.has(host)) state.activeHosts.set(host, now);
+    }
+    state.lastActiveTime = now;
+    startTicking();
+  } else {
+    stopTicking();
+  }
+
   saveState();
 }
 
-// Initialize from storage
-chrome.storage.local.get(null, async result => {
-  state.sessionTime = result.sessionTime || 0;
-  state.dailyTime = result.dailyTime || 0;
-  state.lastActiveTime = result.lastActiveTime || Date.now();
-  state.lastResetDate = result.lastResetDate || new Date().toLocaleDateString();
+function tick() {
+  if (state.activeHosts.size === 0) {
+    stopTicking();
+    return;
+  }
+
+  // Midnight while tabs are still open: bank today's time under the old day,
+  // then let the same hosts start accruing against the new one.
+  if (state.lastResetDate !== dayKey()) {
+    stopAllHosts();
+    rollOverDayIfNeeded();
+    syncActivity();
+  }
+
+  // Restart the interval if it stalled (service worker suspension, throttling).
+  if (state.lastHeartbeat && Date.now() - state.lastHeartbeat > 5000) {
+    console.warn('Timer heartbeat missed, restarting interval');
+    stopTicking();
+    startTicking();
+  }
+  state.lastHeartbeat = Date.now();
+
+  broadcast('UPDATE_TIMERS');
+}
+
+// Initialize from storage.
+// TODO: migrate the v1 flat keys (sessionTime, dailyTime, dailyVisits and the
+// number-valued historicalData entries) once the stored shape is agreed.
+chrome.storage.local.get(null, result => {
+  state.session = result.session || {};
+  state.today = result.today || {};
   state.historicalData = result.historicalData || {};
-  state.dailyVisits = result.dailyVisits || 0;
+  state.lastActiveTime = result.lastActiveTime || Date.now();
+  state.lastResetDate = result.lastResetDate || dayKey();
   state.visitedTabs.clear();
-  
-  if (Date.now() - state.lastActiveTime >= 15 * 60 * 1000) {
-    state.sessionTime = 0;
-  }
-  
-  if (state.lastResetDate !== new Date().toLocaleDateString()) {
-    await saveDailyTotal();
-    state.dailyTime = 0;
-    state.dailyVisits = 0;
-    state.visitedTabs.clear();
-    state.lastResetDate = new Date().toLocaleDateString();
-  }
+
+  resetSessionIfIdle();
+  rollOverDayIfNeeded();
   saveState();
 });
 
-// Handle long-lived connections from content scripts
+// Handle long-lived connections from content scripts. The port name carries the
+// tab's hostname, so the first message already knows which site it belongs to.
 chrome.runtime.onConnect.addListener(port => {
+  const info = { host: canonicalHost(port.name), active: false };
+  state.ports.set(port, info);
+
   port.onMessage.addListener(msg => {
     if (msg.type === 'TAB_ACTIVE') {
-      state.activePort = port;
-      startTimer();
+      info.active = true;
+      syncActivity();
     } else if (msg.type === 'TAB_INACTIVE') {
-      if (state.activePort === port) {
-        state.activePort = null;
-        pauseTimer();
-      }
-    }
-  });
-
-  // Clean up when port disconnects
-  port.onDisconnect.addListener(() => {
-    if (state.activePort === port) {
-      state.activePort = null;
-      pauseTimer();
-    }
-  });
-
-  // Check if this is a new tab visit
-  port.onMessage.addListener(msg => {
-    if (msg.type === 'NEW_TAB') {
-      const tabId = msg.tabId;
-      if (!state.visitedTabs.has(tabId)) {
-        state.visitedTabs.add(tabId);
-        state.dailyVisits++;
+      info.active = false;
+      syncActivity();
+    } else if (msg.type === 'NEW_TAB') {
+      if (!info.host) return;
+      const visitKey = `${info.host}:${msg.tabId}`;
+      if (!state.visitedTabs.has(visitKey)) {
+        state.visitedTabs.add(visitKey);
+        rollOverDayIfNeeded();
+        todayEntry(info.host).visits++;
         saveState();
       }
     }
   });
 
-  // Send initial state
-  const currentTime = state.isRunning ? Math.floor((Date.now() - state.startTime) / 1000) : 0;
-  port.postMessage({
-    type: 'INITIAL_STATE',
-    sessionTime: state.sessionTime + currentTime,
-    dailyTime: state.dailyTime + currentTime,
-    dailyVisits: state.dailyVisits
+  port.onDisconnect.addListener(() => {
+    state.ports.delete(port);
+    syncActivity();
   });
+
+  port.postMessage({ type: 'INITIAL_STATE', ...payloadFor(info.host) });
 });
