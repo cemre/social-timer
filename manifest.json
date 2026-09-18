@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Social Media Time Tracker",
-  "version": "1.5",
+  "version": "1.6",
   "description": "TLDR: Shows how much time you spend on social media.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -12,6 +12,10 @@
   "permissions": [
     "storage"
   ],
+  "action": {
+    "default_title": "Social media stats"
+  },
+  "options_page": "analytics.html",
   "content_scripts": [{
     "matches": [
       "*://*.twitter.com/*",

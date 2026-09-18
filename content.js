@@ -2,6 +2,10 @@ let timerContainer, sessionTimerDisplay, dailyTimerDisplay, visitsDisplay;
 let lastUpdateTime = Date.now();
 let port = null;
 
+// Reported with every message so the background script can split time and
+// visits per site for the analytics page.
+const siteHost = location.hostname.replace(/^www\./, '');
+
 function createTimerUI() {
   // Clean up any existing timer
   const existingTimer = document.querySelector('.social-timer');
@@ -152,7 +156,8 @@ function updatePageState() {
   
   try {
     port.postMessage({
-      type: isPageActive() ? 'TAB_ACTIVE' : 'TAB_INACTIVE'
+      type: isPageActive() ? 'TAB_ACTIVE' : 'TAB_INACTIVE',
+      host: siteHost
     });
   } catch (e) {
     console.warn('Failed to update page state, attempting refresh');
@@ -175,7 +180,8 @@ try {
   // Notify background script about new tab
   port.postMessage({
     type: 'NEW_TAB',
-    tabId: window.crypto.randomUUID()  // Generate unique ID for this tab
+    tabId: window.crypto.randomUUID(),  // Generate unique ID for this tab
+    host: siteHost
   });
 
   ['visibilitychange', 'focus', 'blur'].forEach(event => 

@@ -15,6 +15,20 @@ Social Media Time Tracker is a Chrome extension that shows a small timer overlay
 - Reddit
 - Hacker News
 
+## Daily and Per-Site Stats
+
+Click the extension's toolbar icon to open the stats page. It shows, over the
+last 7 days, the last 30 days, or all time:
+
+- Total time, your average per active day, your busiest day, and visit count.
+- A **By site** breakdown ranking the sites you spent the most time on.
+- A **By day** list, one row per day, where the bar length is that day's total
+  and the bands inside it split the day between sites.
+
+The page reads whatever the timer has already saved, so it fills in as you use
+the tracked sites. Days recorded before per-site tracking existed still show
+their total, labelled as unsplit.
+
 ## Install From the Chrome Web Store
 
 Install the extension from the Chrome Web Store:

@@ -11,8 +11,24 @@ const state = {
   lastHeartbeat: null,
   activePort: null,  // Track the active content script connection
   dailyVisits: 0,    // Track number of visits today
-  visitedTabs: new Set()  // Track unique tabs to avoid counting tab switches
+  visitedTabs: new Set(),  // Track unique tabs to avoid counting tab switches
+  siteHistory: {},   // date -> host -> { seconds, visits }
+  activeHost: null   // host the running timer belongs to
 };
+
+// Hosts are stored as-is (minus "www.") so the analytics page can decide how to
+// group and label them; regrouping later doesn't need the data rewritten.
+function normalizeHost(host) {
+  return typeof host === 'string' ? host.toLowerCase().replace(/^www\./, '') : '';
+}
+
+function siteBucket(host) {
+  const key = normalizeHost(host);
+  if (!key || !state.lastResetDate) return null;
+
+  const day = state.siteHistory[state.lastResetDate] || (state.siteHistory[state.lastResetDate] = {});
+  return day[key] || (day[key] = { seconds: 0, visits: 0 });
+}
 
 function saveState() {
   chrome.storage.local.set({
@@ -21,8 +37,22 @@ function saveState() {
     lastActiveTime: state.lastActiveTime,
     lastResetDate: state.lastResetDate,
     historicalData: state.historicalData,
-    dailyVisits: state.dailyVisits
+    dailyVisits: state.dailyVisits,
+    siteHistory: state.siteHistory
   });
+}
+
+// Everything that records against a day rolls the day over first, so a visit
+// or a stretch just after midnight can't land on yesterday's bucket.
+async function rollOverIfNewDay() {
+  const today = new Date().toLocaleDateString();
+  if (state.lastResetDate === today) return;
+
+  await saveDailyTotal();
+  state.dailyTime = 0;
+  state.dailyVisits = 0;
+  state.visitedTabs.clear();
+  state.lastResetDate = today;
 }
 
 async function saveDailyTotal() {
@@ -62,10 +92,16 @@ function updateTimers() {
   }
 }
 
-async function startTimer() {
+async function startTimer(host) {
   // Reset if timer was stuck
   if (state.isRunning && Date.now() - state.lastHeartbeat > 5000) {
     state.isRunning = false;
+  }
+  
+  // Moving to a different site: close out the running stretch first so its
+  // seconds land on the site that actually earned them.
+  if (state.isRunning && normalizeHost(host) !== state.activeHost) {
+    await pauseTimer();
   }
   
   if (state.isRunning) return;
@@ -75,14 +111,9 @@ async function startTimer() {
     state.sessionTime = 0;
   }
   
-  // Reset daily if it's a new day
-  const today = new Date().toLocaleDateString();
-  if (state.lastResetDate !== today) {
-    await saveDailyTotal();
-    state.dailyTime = 0;
-    state.lastResetDate = today;
-  }
+  await rollOverIfNewDay();
   
+  state.activeHost = normalizeHost(host);
   state.startTime = Date.now();
   state.lastActiveTime = Date.now();
   state.lastHeartbeat = Date.now();
@@ -100,6 +131,11 @@ async function pauseTimer() {
   const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
   state.sessionTime += elapsed;
   state.dailyTime += elapsed;
+  
+  const bucket = siteBucket(state.activeHost);
+  if (bucket) bucket.seconds += elapsed;
+  
+  state.activeHost = null;
   state.isRunning = false;
   state.lastActiveTime = Date.now();
   
@@ -114,19 +150,14 @@ chrome.storage.local.get(null, async result => {
   state.lastResetDate = result.lastResetDate || new Date().toLocaleDateString();
   state.historicalData = result.historicalData || {};
   state.dailyVisits = result.dailyVisits || 0;
+  state.siteHistory = result.siteHistory || {};
   state.visitedTabs.clear();
   
   if (Date.now() - state.lastActiveTime >= 15 * 60 * 1000) {
     state.sessionTime = 0;
   }
   
-  if (state.lastResetDate !== new Date().toLocaleDateString()) {
-    await saveDailyTotal();
-    state.dailyTime = 0;
-    state.dailyVisits = 0;
-    state.visitedTabs.clear();
-    state.lastResetDate = new Date().toLocaleDateString();
-  }
+  await rollOverIfNewDay();
   saveState();
 });
 
@@ -135,7 +166,7 @@ chrome.runtime.onConnect.addListener(port => {
   port.onMessage.addListener(msg => {
     if (msg.type === 'TAB_ACTIVE') {
       state.activePort = port;
-      startTimer();
+      startTimer(msg.host);
     } else if (msg.type === 'TAB_INACTIVE') {
       if (state.activePort === port) {
         state.activePort = null;
@@ -153,12 +184,16 @@ chrome.runtime.onConnect.addListener(port => {
   });
 
   // Check if this is a new tab visit
-  port.onMessage.addListener(msg => {
+  port.onMessage.addListener(async msg => {
     if (msg.type === 'NEW_TAB') {
+      await rollOverIfNewDay();
+      
       const tabId = msg.tabId;
       if (!state.visitedTabs.has(tabId)) {
         state.visitedTabs.add(tabId);
         state.dailyVisits++;
+        const bucket = siteBucket(msg.host);
+        if (bucket) bucket.visits++;
         saveState();
       }
     }
@@ -172,4 +207,9 @@ chrome.runtime.onConnect.addListener(port => {
     dailyTime: state.dailyTime + currentTime,
     dailyVisits: state.dailyVisits
   });
+});
+
+// Toolbar button opens the per-day / per-site breakdown.
+chrome.action.onClicked.addListener(() => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('analytics.html') });
 });
