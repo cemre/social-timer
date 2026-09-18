@@ -15,6 +15,22 @@ Social Media Time Tracker is a Chrome extension that shows a small timer overlay
 - Reddit
 - Hacker News
 
+## Stored Data
+
+Everything the extension records lives in `chrome.storage.local`. Time is in
+seconds, and each site is keyed by its hostname without a leading `www.`:
+
+- `sessionTime` / `dailyTime` — totals across all sites, shown in the overlay.
+- `sessionSiteTime` / `dailySiteTime` — the same two clocks split per site.
+- `dailyVisits` / `dailySiteVisits` — today's visit counts, in total and per site.
+- `historicalData` — one record per day, keyed `YYYY-MM-DD`:
+  `{ total, visits, sites: { "x.com": { time, visits } } }`. Today's record is
+  kept up to date alongside past days.
+
+Days recorded before per-site tracking are still readable: they were stored as
+a bare number of seconds under a locale date string, and are read as a day with
+that total and no per-site breakdown.
+
 ## Install From the Chrome Web Store
 
 Install the extension from the Chrome Web Store:
