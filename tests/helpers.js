@@ -62,21 +62,28 @@ function loadBackground(startMs, seed) {
 
   return {
     store,
-    // A content script connecting from one site.
+    // A content script connecting from one site. `sent` collects what the
+    // worker pushes back, which is what the overlay renders.
     connect(hostname) {
       const handlers = [];
+      const disconnects = [];
+      const sent = [];
       const port = {
         onMessage: { addListener: h => handlers.push(h) },
-        onDisconnect: { addListener() {} },
-        postMessage() {}
+        onDisconnect: { addListener: h => disconnects.push(h) },
+        postMessage: msg => sent.push(msg)
       };
       connect(port);
 
       const send = msg => handlers.forEach(h => h(msg));
       return {
+        sent,
+        last: () => sent[sent.length - 1],
         open: tabId => send({ type: 'NEW_TAB', tabId, hostname }),
         focus: () => send({ type: 'TAB_ACTIVE', hostname }),
-        blur: () => send({ type: 'TAB_INACTIVE', hostname })
+        blur: () => send({ type: 'TAB_INACTIVE', hostname }),
+        // The tab went away without reporting anything, e.g. it was closed.
+        drop: () => disconnects.forEach(h => h())
       };
     },
     // Advances a second at a time so the worker's own interval runs, the way

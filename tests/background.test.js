@@ -206,3 +206,70 @@ test('what the worker writes is what the stats page reads', async () => {
   assert.deepEqual(days[0].sites.map(s => [s.label, s.seconds, s.visits]),
     [['X', 600, 1], ['Hacker News', 300, 1]]);
 });
+
+test('banks time to the active site when a tab disappears without a blur', async () => {
+  const bg = await boot();
+
+  const facebook = bg.connect('facebook.com');
+  facebook.focus();
+  bg.advance(7 * 1000);
+  facebook.drop();
+
+  assert.deepEqual(bg.store.dailySiteTime, { 'facebook.com': 7 });
+  assert.equal(bg.store.dailyTime, 7);
+});
+
+test('a 15-minute idle clears the session split but keeps the daily one', async () => {
+  const bg = await boot();
+
+  const x = bg.connect('x.com');
+  x.focus();
+  bg.advance(12 * 1000);
+  x.blur();
+
+  assert.deepEqual(bg.store.sessionSiteTime, { 'x.com': 12 });
+
+  bg.advance(16 * MINUTE);
+  x.focus();
+
+  assert.deepEqual(bg.store.sessionSiteTime, {});
+  assert.deepEqual(bg.store.dailySiteTime, { 'x.com': 12 });
+});
+
+test('keeps sending the overlay the totals it displays', async () => {
+  const bg = await boot(NOON, { lastResetDate: '2026-09-17', dailyTime: 100 });
+
+  const youtube = bg.connect('youtube.com');
+  youtube.focus();
+  bg.advance(5 * 1000);
+
+  const update = youtube.last();
+  assert.equal(update.type, 'UPDATE_TIMERS');
+  assert.equal(update.dailyTime, 105);
+  assert.equal(update.sessionTime, 5);
+
+  // A tab opening mid-session is told where things stand.
+  const second = bg.connect('youtube.com');
+  assert.equal(second.sent[0].type, 'INITIAL_STATE');
+  assert.equal(second.sent[0].dailyTime, 105);
+});
+
+test('counts one visit per tab, however often it reports itself', async () => {
+  const bg = await boot();
+
+  const instagram = bg.connect('www.instagram.com');
+  instagram.open('tab-1');
+  instagram.open('tab-1');
+  bg.connect('bsky.app').open('tab-2');
+
+  assert.deepEqual(bg.store.dailySiteVisits, { 'instagram.com': 1, 'bsky.app': 1 });
+  assert.equal(bg.store.dailyVisits, 2);
+});
+
+test('a legacy day key for today keeps today\'s counters', async () => {
+  const bg = await boot(NOON, { lastResetDate: '9/17/2026', dailyTime: 300, dailyVisits: 3 });
+
+  assert.equal(bg.store.lastResetDate, '2026-09-17');
+  assert.equal(bg.store.dailyTime, 300);
+  assert.equal(bg.store.dailyVisits, 3);
+});
