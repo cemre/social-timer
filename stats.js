@@ -113,27 +113,54 @@ const SocialStats = (function () {
     return `${total}s`;
   }
 
+  // historicalData[date] is { total, visits, sites: { host: { time, visits } } }.
+  // Versions before per-site tracking stored a bare number of seconds instead.
+  function normalizeRecord(value) {
+    if (typeof value === 'number') return { total: value, visits: 0, sites: {}, legacy: true };
+    if (!value || typeof value !== 'object') return { total: 0, visits: 0, sites: {}, legacy: false };
+
+    return {
+      total: value.total || 0,
+      visits: value.visits || 0,
+      sites: value.sites || {},
+      legacy: false
+    };
+  }
+
   // One entry per day that has anything recorded, newest first.
   function buildDays(stored, now) {
     const data = stored || {};
     const historical = data.historicalData || {};
-    const siteHistory = data.siteHistory || {};
     const currentKey = data.lastResetDate;
 
-    const keys = new Set(Object.keys(historical).concat(Object.keys(siteHistory)));
+    const keys = new Set(Object.keys(historical));
     if (currentKey) keys.add(currentKey);
 
     const days = [];
     keys.forEach(key => {
-      const perHost = siteHistory[key] || {};
+      const record = normalizeRecord(historical[key]);
+
+      // The background script mirrors today into historicalData on every save,
+      // so this is normally already current. Fall back to the live counters in
+      // case the record has not been written yet.
+      let perHost = record.sites;
+      if (key === currentKey && !Object.keys(perHost).length && data.dailySiteTime) {
+        perHost = {};
+        Object.keys(data.dailySiteTime).forEach(host => {
+          perHost[host] = {
+            time: data.dailySiteTime[host],
+            visits: (data.dailySiteVisits || {})[host] || 0
+          };
+        });
+      }
+
       const sites = new Map();
       let siteSeconds = 0;
       let siteVisits = 0;
-      let visitsKnown = false;
 
       Object.keys(perHost).forEach(host => {
         const entry = perHost[host] || {};
-        const seconds = Math.max(0, Math.round(entry.seconds || 0));
+        const seconds = Math.max(0, Math.round(entry.time || 0));
         const visits = Math.max(0, Math.round(entry.visits || 0));
         if (!seconds && !visits) return;
 
@@ -145,13 +172,12 @@ const SocialStats = (function () {
 
         siteSeconds += seconds;
         siteVisits += visits;
-        visitsKnown = true;
       });
 
-      // historicalData is only written at the day rollover, so today's total
-      // still lives in dailyTime. Take whichever source knows the most.
-      let total = Math.max(0, Math.round(historical[key] || 0), siteSeconds);
-      let visits = visitsKnown ? siteVisits : null;
+      let total = Math.max(0, Math.round(record.total), siteSeconds);
+      // A day stored before visits were recorded has no count to show, which
+      // is not the same as a day on which nothing was visited.
+      let visits = record.legacy ? null : Math.max(Math.round(record.visits || 0), siteVisits);
 
       if (key === currentKey) {
         total = Math.max(total, Math.max(0, Math.round(data.dailyTime || 0)));
@@ -250,7 +276,7 @@ const SocialStats = (function () {
 
   return {
     SITES, OTHER_KEY, UNTRACKED_KEY, COLOR_SLOTS,
-    siteKey, siteLabel, dateKeyToISO, shiftISO, todayISO,
+    siteKey, siteLabel, dateKeyToISO, shiftISO, todayISO, normalizeRecord,
     formatDayLabel, formatDuration, buildDays, mergeSites, buildPalette, summarize
   };
 })();
