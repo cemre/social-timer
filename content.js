@@ -2,6 +2,10 @@ let timerContainer, sessionTimerDisplay, dailyTimerDisplay, visitsDisplay;
 let lastUpdateTime = Date.now();
 let port = null;
 
+// Sent with every message so the background script can attribute time to this
+// site. Keyed the way feedgate.js keys a host: lowercase, no leading "www.".
+const SITE_HOST = location.hostname.toLowerCase().replace(/^www\./, '');
+
 function createTimerUI() {
   // Clean up any existing timer
   const existingTimer = document.querySelector('.social-timer');
@@ -152,7 +156,8 @@ function updatePageState() {
   
   try {
     port.postMessage({
-      type: isPageActive() ? 'TAB_ACTIVE' : 'TAB_INACTIVE'
+      type: isPageActive() ? 'TAB_ACTIVE' : 'TAB_INACTIVE',
+      hostname: SITE_HOST
     });
   } catch (e) {
     console.warn('Failed to update page state, attempting refresh');
@@ -175,7 +180,8 @@ try {
   // Notify background script about new tab
   port.postMessage({
     type: 'NEW_TAB',
-    tabId: window.crypto.randomUUID()  // Generate unique ID for this tab
+    tabId: window.crypto.randomUUID(),  // Generate unique ID for this tab
+    hostname: SITE_HOST
   });
 
   ['visibilitychange', 'focus', 'blur'].forEach(event => 

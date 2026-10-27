@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Social media stats</title>
+  <link rel="stylesheet" href="analytics.css">
+</head>
+<body>
+  <main class="page">
+    <header class="head">
+      <div class="head__titles">
+        <h1 class="head__title">Your social media time</h1>
+        <p class="head__caption" id="caption"></p>
+      </div>
+      <div class="range" id="range" role="group" aria-label="Time range">
+        <button type="button" class="range__btn" data-range="7">7 days</button>
+        <button type="button" class="range__btn" data-range="30">30 days</button>
+        <button type="button" class="range__btn" data-range="0">All time</button>
+      </div>
+    </header>
+
+    <p class="notice" id="notice" hidden></p>
+
+    <section class="blank" id="blank" hidden>
+      <h2 class="blank__title">Nothing recorded yet</h2>
+      <p class="blank__body">
+        Spend a little time on one of the tracked sites and your daily and
+        per-site breakdown will show up here.
+      </p>
+    </section>
+
+    <div id="content" hidden>
+      <section class="summary" aria-label="Summary">
+        <div class="hero">
+          <p class="hero__label" id="hero-label">Total</p>
+          <p class="hero__value" id="hero-value"></p>
+          <p class="hero__note" id="hero-note"></p>
+        </div>
+        <div class="tiles">
+          <div class="tile">
+            <p class="tile__label">Average per active day</p>
+            <p class="tile__value" id="stat-average"></p>
+          </div>
+          <div class="tile">
+            <p class="tile__label">Busiest day</p>
+            <p class="tile__value" id="stat-busiest"></p>
+            <p class="tile__note" id="stat-busiest-note"></p>
+          </div>
+          <div class="tile">
+            <p class="tile__label">Visits</p>
+            <p class="tile__value" id="stat-visits"></p>
+            <p class="tile__note" id="stat-visits-note"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="sites-title">
+        <h2 class="panel__title" id="sites-title">By site</h2>
+        <div class="sites" id="sites"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="days-title">
+        <h2 class="panel__title" id="days-title">By day</h2>
+        <div class="legend" id="legend"></div>
+        <div class="days" id="days"></div>
+      </section>
+    </div>
+  </main>
+
+  <div class="tip" id="tip" role="status" hidden></div>
+
+  <script src="stats.js"></script>
+  <script src="analytics.js"></script>
+</body>
+</html>
